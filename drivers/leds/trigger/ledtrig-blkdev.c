@@ -527,18 +527,18 @@ static void blkdev_trig_btb_release(struct device *dev, void *res)
  * Context:	Process context.
  * Return:	The block device, or an error pointer.
  */
-static struct block_device *blkdev_trig_get_bdev(const char *path, size_t len)
+static struct bdev_handle *blkdev_trig_get_bdev(const char *path, size_t len)
 {
-	struct block_device *bdev;
+	struct bdev_handle *handle;
 	char *buf;
 
 	buf = kmemdup(path, len + 1, GFP_KERNEL);  /* +1 to include null */
 	if (buf == NULL)
 		return ERR_PTR(-ENOMEM);
 
-	bdev = blkdev_get_by_path(strim(buf), 0, NULL, NULL);
+	handle = bdev_open_by_path(strim(buf), 0, NULL, NULL);
 	kfree(buf);
-	return bdev;
+	return handle;
 }
 
 /**
@@ -558,12 +558,15 @@ static struct blkdev_trig_bdev *blkdev_trig_get_btb(const char *path,
 						    size_t len)
 {
 	struct block_device *bdev;
+	struct bdev_handle *handle;
 	struct blkdev_trig_bdev *btb;
 	int err;
 
-	bdev = blkdev_trig_get_bdev(path, len);
-	if (IS_ERR(bdev))
-		return ERR_CAST(bdev);
+	handle = blkdev_trig_get_bdev(path, len);
+	if (IS_ERR(handle))
+		return ERR_CAST(handle);
+
+	bdev = handle->bdev;
 
 	btb = devres_find(&bdev->bd_device, blkdev_trig_btb_release,
 			  NULL, NULL);
@@ -600,7 +603,7 @@ exit_free_btb:
 	if (err)
 		devres_free(btb);
 exit_put_bdev:
-	blkdev_put(bdev, NULL);
+	bdev_release(handle);
 	return err ? ERR_PTR(err) : btb;
 }
 
@@ -756,11 +759,15 @@ static ssize_t unlink_dev_by_path_store(struct device *dev,
 	struct blkdev_trig_led *btl = led_trigger_get_drvdata(dev);
 	struct block_device *bdev;
 	struct blkdev_trig_bdev *btb;
+	struct bdev_handle *handle;
+
 	int err;
 
-	bdev = blkdev_trig_get_bdev(buf, count);
-	if (IS_ERR(bdev))
-		return PTR_ERR(bdev);
+	handle = blkdev_trig_get_bdev(buf, count);
+	if (IS_ERR(handle))
+		return PTR_ERR(handle);
+
+	bdev = handle->bdev;
 
 	err = mutex_lock_interruptible(&blkdev_trig_mutex);
 	if (err)
@@ -783,7 +790,7 @@ static ssize_t unlink_dev_by_path_store(struct device *dev,
 exit_unlock:
 	mutex_unlock(&blkdev_trig_mutex);
 exit_put_bdev:
-	blkdev_put(bdev, NULL);
+	bdev_release(handle);
 	return err ? : count;
 }
 
