@@ -116,6 +116,7 @@ struct blkdev_trig_led {
 	unsigned long		mode;  /* must be ulong for atomic bit ops */
 	struct led_classdev	*led;
 	unsigned int		blink_msec;
+	bool			invert;
 	unsigned int		check_jiffies;
 	struct xarray		linked_btbs;
 	struct hlist_node	all_btls_node;
@@ -193,7 +194,7 @@ static bool blkdev_trig_blink(const struct blkdev_trig_led *btl,
 		delay_on = READ_ONCE(btl->blink_msec);
 		delay_off = 1;	/* 0 leaves LED turned on */
 
-		led_blink_set_oneshot(btl->led, &delay_on, &delay_off, 0);
+		led_blink_set_oneshot(btl->led, &delay_on, &delay_off, btl->invert);
 		return true;
 	}
 
@@ -1151,6 +1152,31 @@ static ssize_t blink_on_discard_store(struct device *dev,
 				      buf, count, STAT_DISCARD);
 }
 
+static ssize_t invert_show(struct device *dev,
+			   struct device_attribute *attr, char *buf)
+{
+	struct blkdev_trig_led *btl = led_trigger_get_drvdata(dev);
+
+	return sprintf(buf, btl->invert ? "Y\n" : "N\n");
+}
+
+static ssize_t invert_store(struct device *dev, struct device_attribute *attr,
+			    const char *buf, size_t count)
+{
+	bool set;
+	int err;
+	struct blkdev_trig_led *btl = led_trigger_get_drvdata(dev);
+
+	err = kstrtobool(buf, &set);
+	if (err)
+		return err;
+
+	btl->invert = set;
+	led_set_brightness(btl->led, set ? LED_FULL : LED_OFF);
+
+	return count;
+}
+
 /* Device attributes */
 static DEVICE_ATTR_WO(link_dev_by_path);
 static DEVICE_ATTR_WO(unlink_dev_by_path);
@@ -1161,6 +1187,7 @@ static DEVICE_ATTR_RW(blink_on_read);
 static DEVICE_ATTR_RW(blink_on_write);
 static DEVICE_ATTR_RW(blink_on_flush);
 static DEVICE_ATTR_RW(blink_on_discard);
+static DEVICE_ATTR_RW(invert);
 
 /* Device attributes in LED directory (/sys/class/leds/<led>/...) */
 static struct attribute *blkdev_trig_attrs[] = {
@@ -1173,6 +1200,7 @@ static struct attribute *blkdev_trig_attrs[] = {
 	&dev_attr_blink_on_write.attr,
 	&dev_attr_blink_on_flush.attr,
 	&dev_attr_blink_on_discard.attr,
+	&dev_attr_invert.attr,
 	NULL
 };
 
